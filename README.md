@@ -8,7 +8,7 @@ A full-stack web application to track, rate, and manage your personal movie watc
 
 ## Screenshot
 
-![Movie Watchlist UI](movie-watchlist-ui.png)
+<img width="1517" height="906" alt="Image" src="https://github.com/user-attachments/assets/d08ee3e8-7bb4-4c64-9916-04253f81b341" />
 
 ## Features
 
