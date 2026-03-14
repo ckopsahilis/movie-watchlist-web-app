@@ -10,7 +10,7 @@ load_dotenv()
 
 DATABASE_URL: str = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/movie_watchlist",
+    "postgresql+psycopg://postgres:postgres@localhost:5432/movie_watchlist",
 )
 
 ITEMS_PER_PAGE: int = int(os.getenv("ITEMS_PER_PAGE", "10"))

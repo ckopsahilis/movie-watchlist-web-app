@@ -18,28 +18,28 @@ Detailed technical documentation for the Movie Watchlist application.
 
 ## Architecture Overview
 
-The application follows a classic **server-rendered MVC pattern**:
+The application follows a decoupled **Client-Server architecture**:
 
 ```
-Browser  ──HTTP──▶  FastAPI (routes.py)
+Browser  ──HTTP──▶  React SPA (Vite Dev Server / Static Build)
+                        │
+                  (JSON via Fetch)
+                        │
+                        ▼
+                    FastAPI (routes.py)
                         │
                         ├──▶ SQLAlchemy ORM (models.py / database.py)
                         │        │
                         │        └──▶ PostgreSQL (movie_watchlist DB)
-                        │
-                        └──▶ Jinja2 Templates (index.html)
-                                  │
-                                  └──▶ Static Assets (style.css, script.js)
 ```
 
-**Request lifecycle:**
-
-1. User sends a request (e.g. `GET /` or `POST /add`).
-2. FastAPI matches the route in `routes.py`.
-3. The route handler receives a SQLAlchemy **session** via the `get_db` dependency.
-4. The handler queries or mutates the `movies` table through the `Movie` ORM model.
-5. For `GET` requests, the handler renders `index.html` with Jinja2 and returns HTML.
-6. For `POST` requests, the handler performs the action, sets a flash message cookie, and redirects to `/`.
+1. User interacts with the React frontend (e.g. loads page or clicks "Add").
+2. React dispatches an asynchronous `fetch()` request to the FastAPI backend.
+3. FastAPI matches the route in `routes.py` (e.g., `GET /api/movies` or `POST /api/add`).
+4. The route handler receives a SQLAlchemy **session** via the `get_db` dependency.
+5. The handler queries or mutates the `movies` table through the `Movie` ORM model.
+6. The handler returns a JSON response containing data or success/error messages.
+7. React state updates locally, triggering a re-render of the isolated UI components.
 
 ---
 
@@ -56,8 +56,8 @@ Base = declarative_base()                           # Base class for ORM models
 ```
 
 - **`DATABASE_URL`** is loaded from the `.env` file via `app/config.py`.
-- The default is `postgresql://postgres:postgres@localhost:5432/movie_watchlist`.
-- **`psycopg2-binary`** is the PostgreSQL driver that SQLAlchemy uses under the hood.
+- The default is `postgresql+psycopg://postgres:postgres@localhost:5432/movie_watchlist`.
+- **`psycopg[binary]`** (psycopg 3.x) is the modern PostgreSQL driver that SQLAlchemy uses under the hood, natively resolving C++ build errors on Windows.
 
 ### Dependency Injection
 
@@ -140,76 +140,52 @@ Also exports `GENRE_CHOICES` — the list of 16 genres used in the UI dropdowns.
 
 ### Flash Messages
 
-`app/flash.py` provides cookie-based flash messages with no extra dependencies:
-
-| Function        | Description                                          |
-|----------------|------------------------------------------------------|
-| `set_flash()`   | Stores a message and category in short-lived cookies |
-| `get_flash()`   | Reads the flash message from cookies                 |
-| `clear_flash()` | Deletes flash cookies after displaying               |
+The application handles notifications dynamically via React component state. When the backend returns a successful JSON message or an error code natively, the `App.jsx` component captures this and mounts the `<FlashMessage />` component locally in the browser, tracking a timeout ID to dismiss itself automatically without requiring server cookies.
 
 ---
 
 ## Frontend
 
-### Template
+### React Components Architecture
 
-`templates/index.html` — a single-page Jinja2 template containing:
+The frontend is a strictly declarative Single Page Application (SPA) built with React 18 and bundled via Vite.
 
-- **Header** with app branding
-- **Flash message** banner (auto-dismisses after 4 seconds)
-- **Add Movie** collapsible card with form (title, director, genre, notes, star rating)
-- **Filter bar** with search, genre dropdown, status filter, and sort selector
-- **Movie table** with all fields and action buttons (edit, toggle watched, delete)
-- **Pagination** controls
-- **Edit dialog** (`<dialog>` element) for inline editing
-- **Empty state** when no movies match
+- **`frontend/src/App.jsx`**: The main orchestrator connecting state hooks, API fetches, and child components.
+- **`<Header />`**: Pure presentational branding.
+- **`<AddMovieCard />`**: Form with internal expansion state and validation logic.
+- **`<FilterBar />`**: Holds dropdowns linking back to the parent `filters` state.
+- **`<MovieTable />`**: The primary list renderer traversing arrays of backend JSON movie objects.
+- **`<Pagination />`**: Discrete component tracking mathematical offsets.
+- **`<EditMovieDialog />`**: Native modal controlled declaratively via `useRef`.
+- **`<FlashMessage />`**: Manages its auto-dismissing lifecycle via a `useEffect` timer.
 
 ### Styling
 
-`static/style.css` — custom styles on top of Pico CSS:
+`frontend/src/index.css` encapsulates global custom styles merged on top of Pico CSS via CDN:
 
 - Dark theme with accent color `#6b8aff`
-- Star rating widget (pure CSS, no JavaScript)
-- Responsive grid layouts for the add form
-- Badge styles for genre, watched/unwatched status
-- Flash message animations
-- Collapsible card UI
-- Action button hover effects
+- Advanced CSS selectors defining collapsable widgets, badge tags, and input scopes.
+- React components inject semantic class names correlating directly to this stylesheet for native HTML presentation without heavyweight CSS-in-JS libraries.
 
-### JavaScript
+### State Management
 
-`static/script.js` — minimal vanilla JS:
-
-| Function          | Purpose                                        |
-|------------------|------------------------------------------------|
-| `toggleCard(id)`  | Collapse/expand the "Add Movie" card           |
-| `initFlash()`     | Auto-dismiss flash messages after 4 seconds    |
-| `openEdit(...)`   | Populate and open the edit dialog               |
-| `closeEditDialog()` | Close the edit dialog                        |
+All interactivity replaces obsolete imperative DOM lookup (`getElementById()`) mapping directly to immutable `useState` logic synchronizing immediately against visual representations seamlessly.
 
 ---
 
 ## API Routes
 
-All routes are defined in `app/routes.py`.
+All backend endpoints output strict `application/json` data and accept form-encoded or query parameter inputs over a standard `Router` prefix of `/api`.
 
-### Pages
+### Endpoints (JSON)
 
-| Method | Path               | Description                                |
-|--------|--------------------|--------------------------------------------|
-| `GET`  | `/`                | List movies with search, filter, sort, pagination |
-
-### Actions (form submissions)
-
-| Method | Path               | Description                                |
-|--------|--------------------|--------------------------------------------|
-| `POST` | `/add`             | Add a new movie                            |
-| `POST` | `/edit/{movie_id}` | Update an existing movie                   |
-| `POST` | `/watched/{movie_id}` | Toggle watched/unwatched status         |
-| `POST` | `/delete/{movie_id}` | Delete a movie                           |
-
-All `POST` routes redirect to `/` with a flash message after completing the action.
+| Method | Path                        | Description                                          |
+|--------|-----------------------------|------------------------------------------------------|
+| `GET`  | `/api/movies`               | List movies with search, filter, sort, pagination    |
+| `POST` | `/api/add`                  | Create a new movie record and return success msg     |
+| `POST` | `/api/edit/{movie_id}`      | Updates a record entirely via targeted ID targeting  |
+| `POST` | `/api/watched/{movie_id}`   | Toggle watched/unwatched boolean state via ID      |
+| `POST` | `/api/delete/{movie_id}`    | Deletes the mapped DB row outright                     |
 
 ### Query Parameters (GET /)
 

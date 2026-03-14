@@ -7,27 +7,24 @@ from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, Query, Request
-from fastapi.responses import RedirectResponse
-from fastapi.templating import Jinja2Templates
+from fastapi import APIRouter, Depends, Form, Query, Request, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.flash import clear_flash, get_flash, set_flash
 from app.models import Movie
 from app.schemas import GENRE_CHOICES
 from app.config import ITEMS_PER_PAGE
 
-router = APIRouter()
-templates = Jinja2Templates(directory="templates")
+router = APIRouter(prefix="/api")
 
 
 # ---------------------------------------------------------------------------
 # GET / — list movies with search, filter, sort, pagination
 # ---------------------------------------------------------------------------
-@router.get("/")
-def index(
+@router.get("/movies")
+def list_movies(
     request: Request,
     q: Optional[str] = Query(None),
     genre: Optional[str] = Query(None),
@@ -75,42 +72,12 @@ def index(
     page = min(page, total_pages)
     movies = query.offset((page - 1) * ITEMS_PER_PAGE).limit(ITEMS_PER_PAGE).all()
 
-    # Preserve query params for pagination links
-    params = {}
-    if q:
-        params["q"] = q
-    if genre:
-        params["genre"] = genre
-    if status:
-        params["status"] = status
-    if sort and sort != "newest":
-        params["sort"] = sort
-    base_qs = urlencode(params)
-
-    # Flash message
-    flash_message, flash_category = get_flash(request)
-
-    response = templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "movies": movies,
-            "q": q or "",
-            "genre": genre or "",
-            "status": status or "",
-            "sort": sort or "newest",
-            "page": page,
-            "total_pages": total_pages,
-            "total": total,
-            "base_qs": base_qs,
-            "genres": GENRE_CHOICES,
-            "flash_message": flash_message,
-            "flash_category": flash_category,
-        },
-    )
-    if flash_message:
-        clear_flash(response)
-    return response
+    return {
+        "movies": movies,
+        "page": page,
+        "total_pages": total_pages,
+        "total": total,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -135,9 +102,7 @@ def add_movie(
     db.add(movie)
     db.commit()
 
-    response = RedirectResponse(url="/", status_code=303)
-    set_flash(response, f"'{title}' added to your watchlist!", "success")
-    return response
+    return {"message": f"'{title}' added"}
 
 
 # ---------------------------------------------------------------------------
@@ -161,12 +126,9 @@ def edit_movie(
         movie.notes = notes or None
         movie.rating = rating or None
         db.commit()
-        response = RedirectResponse(url="/", status_code=303)
-        set_flash(response, f"'{title}' updated!", "success")
+        return {"message": f"'{title}' updated"}
     else:
-        response = RedirectResponse(url="/", status_code=303)
-        set_flash(response, "Movie not found.", "error")
-    return response
+        raise HTTPException(status_code=404, detail="Movie not found")
 
 
 # ---------------------------------------------------------------------------
@@ -180,12 +142,9 @@ def toggle_watched(movie_id: int, db: Session = Depends(get_db)):
         movie.watched_at = datetime.now(timezone.utc) if movie.is_watched else None
         db.commit()
         label = "watched" if movie.is_watched else "unwatched"
-        response = RedirectResponse(url="/", status_code=303)
-        set_flash(response, f"'{movie.title}' marked as {label}.", "success")
+        return {"message": f"'{movie.title}' marked as {label}"}
     else:
-        response = RedirectResponse(url="/", status_code=303)
-        set_flash(response, "Movie not found.", "error")
-    return response
+        raise HTTPException(status_code=404, detail="Movie not found")
 
 
 # ---------------------------------------------------------------------------
@@ -198,9 +157,6 @@ def delete_movie(movie_id: int, db: Session = Depends(get_db)):
         title = movie.title
         db.delete(movie)
         db.commit()
-        response = RedirectResponse(url="/", status_code=303)
-        set_flash(response, f"'{title}' deleted.", "success")
+        return {"message": f"'{title}' deleted"}
     else:
-        response = RedirectResponse(url="/", status_code=303)
-        set_flash(response, "Movie not found.", "error")
-    return response
+        raise HTTPException(status_code=404, detail="Movie not found")
